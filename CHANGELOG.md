@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.3
+
+- Three prompts showed an empty name: PowerShell reads `"$Distro?"` as a variable called `Distro?`. They use `"$($Distro)?"` now.
+- `Get-HerdrBlocks` is `Get-HerdrBlock` (PSScriptAnalyzer: singular nouns).
+
 ## 0.2.2
 
 - **Fresh Ubuntu/Debian installs work again.** `sshd -t` (added in 0.2.0) failed

@@ -164,7 +164,7 @@ function Remove-KeySection {
 
 # The herdr-wsl Host blocks in ~/.ssh/config: machine, port and distro of each.
 # (Blocks from 0.2.1 and earlier have no distro line: Distro is $null.)
-function Get-HerdrBlocks {
+function Get-HerdrBlock {
   $text = if (Test-Path $SshConfig) { [IO.File]::ReadAllText($SshConfig) } else { "" }
   $re = [regex]::Escape($Begin) + '\r?\nHost (\S+)\r?\n(.*?)' + [regex]::Escape($End)
   foreach ($m in [regex]::Matches($text, $re, "Singleline")) {
@@ -312,7 +312,7 @@ $UnauthorizeScript = @'
 # ---------------------------------------------------------------- the distro
 
 if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { Fail "WSL isn't installed (wsl --install)." }
-$Blocks = @(Get-HerdrBlocks)
+$Blocks = @(Get-HerdrBlock)
 $Ours = $Blocks | Where-Object { $_.Machine -eq $Machine } | Select-Object -First 1
 # Uninstall acts on the distro and port this machine was set up with, not the defaults.
 if ($Uninstall -and $Ours) {
@@ -352,8 +352,8 @@ if ($Uninstall) {
     Note "removed Host $Machine and its known_hosts line"
   }
   # Other distros set up the same way keep their entries, the key and the mods.
-  $others = @(Get-HerdrBlocks)
-  if ((Test-Path "$KeyFile.pub") -and (Ask "Unauthorize the herdr-wsl key in $Distro?")) {
+  $others = @(Get-HerdrBlock)
+  if ((Test-Path "$KeyFile.pub") -and (Ask "Unauthorize the herdr-wsl key in $($Distro)?")) {
     Invoke-DistroScript $UnauthorizeScript | Out-Null
     if (-not $others) {
       Remove-Item "$KeyFile", "$KeyFile.pub" -ErrorAction SilentlyContinue
@@ -417,7 +417,7 @@ if (-not $stale -and (Test-Ssh)) {
     Fail "~/.ssh/config already has a 'Host $Machine' that doesn't connect. Fix or rename it, or pass -Machine <other name>."
   }
   $what = if ($stale) { "update 'Host $Machine' in ~/.ssh/config (port $Port, distro $Distro)" } else { "add 'Host $Machine' to ~/.ssh/config" }
-  if (-not (Ask "Use ~/.ssh/herdr_wsl_ed25519 (no passphrase; made if missing), authorize it in $Distro (from this PC only) and $what?")) {
+  if (-not (Ask "Use ~/.ssh/herdr_wsl_ed25519 (no passphrase; made if missing), authorize it in $Distro (from this PC only) and $($what)?")) {
     Fail "Herdr needs to reach the distro over ssh; stopped."
   }
   New-Item -ItemType Directory -Force (Split-Path $KeyFile) | Out-Null
@@ -452,7 +452,7 @@ if ($known) {
 Say "4/4 Herdr: mods, layout, key"
 $app = Find-HerdrApp
 if (Test-Path (Join-Path $Src "mods\wsl\main.js")) {
-  if (Ask "Install the wsl and wsl-spaces mods, the main-wsl layout and ctrl-shift-n into $HerdrHome?") {
+  if (Ask "Install the wsl and wsl-spaces mods, the main-wsl layout and ctrl-shift-n into $($HerdrHome)?") {
     foreach ($m in $Mods) { Note ("mods/{0}: {1}" -f $m, (Install-Mod $m)) }
     $layout = Join-Path $HerdrHome "layouts\main-wsl.json"
     if (Test-Path $layout) {
