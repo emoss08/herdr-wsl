@@ -1,0 +1,5 @@
+{
+  "layout:main-wsl": {
+    "ctrl-shift-n": "wsl.new-space"
+  }
+}
