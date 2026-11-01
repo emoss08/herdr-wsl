@@ -23,9 +23,17 @@ Check "valid, one section" ((Valid) -and (Count) -eq 1)
 $commented = "{`n  // mine`n  `"global`": { `"ctrl-1`": `"tab.select:1`" }`n}`n"
 [IO.File]::WriteAllText($file, $commented)
 $r1 = Add-KeySection; $r2 = Add-KeySection
-Check "add -> '$r1'" ($r1 -like "left alone*")
-Check "second add -> '$r2'" ($r2 -like "left alone*")
-Check "file untouched" ([IO.File]::ReadAllText($file) -eq $commented)
+# PowerShell 7's ConvertFrom-Json accepts comments, 5.1's doesn't: either the file is left
+# alone, or the section is added once with the comment kept. Never broken, never twice.
+if ($r1 -like "left alone*") {
+  Check "add -> '$r1'" $true
+  Check "second add -> '$r2'" ($r2 -like "left alone*")
+  Check "file untouched" ([IO.File]::ReadAllText($file) -eq $commented)
+} else {
+  Check "add -> '$r1'" ($r1 -like "added*")
+  Check "second add -> '$r2'" ($r2 -eq "already there")
+  Check "one section, comment kept" ((Count) -eq 1 -and [IO.File]::ReadAllText($file).Contains("// mine"))
+}
 
 "3. normal keys.json"
 [IO.File]::WriteAllText($file, "{`n  `"global`": {`n    `"ctrl-left`": `"send:\u001bb`"`n  }`n}`n")
