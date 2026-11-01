@@ -6,7 +6,8 @@
 // herdr-wsl: Herdr's `spaces` mod (0.1.11, Apache-2.0, github.com/herdrdev/herdr-app),
 // changed so WSL is where spaces go: the "This computer" group is left out while it
 // has no spaces, and the header's + makes a space on the WSL machine (the `machine`
-// in mods/wsl/config.json, default `wsl`). Changes are marked "herdr-wsl:".
+// in mods/wsl/config.json, default `wsl`) while it's connected, else on this computer.
+// Changes are marked "herdr-wsl:".
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -383,8 +384,9 @@ export default class Spaces extends View {
       .child(h_flex().h(31).pl(16).pr(10).items_center().justify_between().text_size(11.5).text_color(t.dim)
         .when(!collapsed, el => el.child("Spaces"))
         .child(div().id("space-new").size(26).flex_none().flex().items_center().justify_center().rounded(6).hover(s => s.bg(t.hover).text_color(t.foreground))
-          // herdr-wsl: on the WSL machine, not this computer.
-          .on_click(() => run("space.new", { machine: this.wsl })).child(svg("mods/workspace-chrome/plus.svg").size(14))))
+          // herdr-wsl: on the WSL machine while it's connected, else this computer.
+          .on_click(() => run("space.new", machines().some((m) => m.name === this.wsl && m.layout === "ready") ? { machine: this.wsl } : {}))
+          .child(svg("mods/workspace-chrome/plus.svg").size(14))))
       .child(v_flex().flex_1().min_h(0).px(8).pb(14).overflow_y_scrollbar().mode("always")
         .on_mouse_up("left", (_e, cx) => { this.pressed = null; cx.notify(); })
         .children(this.grouped(t, collapsed)));

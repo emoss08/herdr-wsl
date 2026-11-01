@@ -74,8 +74,9 @@ The `main-wsl` layout: Herdr's own `main` layout with two changes in the sidebar
   2. on Windows: makes `~/.ssh/herdr_wsl_ed25519` (ed25519, no passphrase, comment
      `herdr-wsl`), adds it to the distro user's `authorized_keys` as
      `from="127.0.0.1,::1" ssh-ed25519 … herdr-wsl`, and appends a `Host wsl` entry
-     (127.0.0.1, port, user, that key, `IdentitiesOnly yes`,
-     `StrictHostKeyChecking accept-new`) between `# >>> herdr-wsl` / `# <<< herdr-wsl`;
+     (a `# distro: <name>` line, 127.0.0.1, port, user, that key, `IdentitiesOnly yes`,
+     `StrictHostKeyChecking accept-new`) between `# >>> herdr-wsl` / `# <<< herdr-wsl`.
+     A re-run with another `-Port` or distro rewrites that entry;
   3. `hc machine add wsl --name wsl --install` (copies hc into the distro);
   4. from the repo folder: copies `mods/wsl` and `mods/wsl-spaces` (each `mod.json`
      first), `layouts/main-wsl.json` (+ `.png`) unless one exists, adds the
@@ -83,9 +84,12 @@ The `main-wsl` layout: Herdr's own `main` layout with two changes in the sidebar
      `keys.json.bak-herdr-wsl`), merges `{machine, distro}` into `mods/wsl/config.json`,
      runs `herdr-app check` on both mods and `layout.switch main-wsl`.
   Options: `-Distro` (default: WSL's default), `-Port` (2222), `-Machine` (`wsl`),
-  `-Uninstall` (only that machine's Host entry; the key and the Herdr files go with
-  the last machine). Steps already done are skipped; a key from an earlier setup gets
-  the `from=` restriction.
+  `-Uninstall`. Uninstall reads the port and distro from that machine's Host entry
+  (pass `-Distro` for an entry from 0.2.1 or earlier when several exist), removes
+  only that entry, and points `mods/wsl/config.json` at a remaining machine; the key
+  and the Herdr files go with the last machine. Steps already done are skipped; a key
+  from an earlier setup gets the `from=` restriction. `keys.json` is written only if
+  the result parses; one with comments is left alone with a note.
 - **`layouts/main-wsl.json`**: a clone of Herdr's `main` (0.1.11). The `spaces` block's
   mod is `wsl-spaces`; a block between `sidebar-lists` and `sidebar-footer`:
   `{ "id": "wsl", "type": "block", "content": { "mod": "wsl" }, "size": { "px": 34 } }`;
@@ -101,7 +105,7 @@ The `main-wsl` layout: Herdr's own `main` layout with two changes in the sidebar
 - **`mods/wsl-spaces`**: `mod.clone` of Herdr's `spaces` (Apache-2.0, its LICENSE
   alongside), changes marked `herdr-wsl:` — `machineNames` leaves out `null` when no
   row is local; the header `+` runs `space.new {machine}` with the machine from
-  `mods/wsl/config.json`.
+  `mods/wsl/config.json` while that machine is `ready`, else a local `space.new`.
 - Programs: `wsl.exe`, `hc`. No network access.
 
 ## Watch out
@@ -119,6 +123,11 @@ The `main-wsl` layout: Herdr's own `main` layout with two changes in the sidebar
   used.
 - Ubuntu 22.10+ starts sshd from `ssh.socket`; the script runs `ssh.service`. sshd
   comes back on its own after `wsl --terminate`.
+- On a distro whose sshd has never run, Debian/Ubuntu's `sshd -t` fails with "Missing
+  privilege separation directory: /run/sshd"; create it before checking.
+- The redirect checks WSL is still `ready` when its 2.5s are up, so a local space is
+  never closed for a WSL space that can't open. An unknown machine state shows as its
+  own word instead of failing the render.
 - All WSL 2 distros share one network: each set-up distro needs its own `-Port` and
   `-Machine`. A port taken on Windows breaks localhost forwarding; the script says so.
 - Distros need systemd (`[boot] systemd=true` in `/etc/wsl.conf`; the default on

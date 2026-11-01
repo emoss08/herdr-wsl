@@ -44,6 +44,7 @@ export default class Wsl extends View {
     this.redirect = false;   // config redirect_local
     this.why = null;         // hc's reason while the machine is offline
     this.lastNudge = 0;
+    this.launched = 0;       // when the keepalive was last started
     this.seen = new Set(spaces().map((s) => s.id)); // spaces there at start are never redirected
     cx.spawn(async (cx) => {
       try {
@@ -83,6 +84,9 @@ export default class Wsl extends View {
 
   keepAlive() {
     if (terminals().some((t) => t.name === KEEPALIVE && t.state === "live")) return false;
+    // One launch at a time: terminals() lists the new one only once hc has started it.
+    if (Date.now() - this.launched < 10000) return false;
+    this.launched = Date.now();
     hc(["run", "--bg", "--no-parent", "--no-notify", "--rm", "--name", KEEPALIVE,
       "--label", "wsl.role=keepalive",
       "wsl.exe", ...(this.distro ? ["-d", this.distro] : []), "--", "sleep", "infinity"]).catch(() => {});
@@ -116,6 +120,8 @@ export default class Wsl extends View {
       this.seen.add(s.id);
       if (!this.redirect || s.machine || this.state() !== "ready") continue;
       cx.timer.after(REDIRECT_AFTER, () => {
+        // WSL may have dropped meanwhile: then the local space stays.
+        if (this.state() !== "ready") return;
         const now = spaces().find((x) => x.id === s.id);
         if (!now || now.tabs.length !== 1) return;
         const ps = panes().filter((p) => p.tab === now.tabs[0].id);
@@ -134,13 +140,15 @@ export default class Wsl extends View {
   render() {
     const t = theme();
     const state = this.state();
-    const s = STATE[state];
+    // A state this version doesn't know (a newer Herdr) shows as itself.
+    const s = STATE[state] ?? { word: String(state).replace(/_/g, " "), color: (t) => t.dim };
     const ready = state === "ready";
     const offline = state === "unavailable";
     // Connected, the row opens a space; offline, it wakes WSL and reconnects.
     const act = (_e, cx) => (ready ? this.newSpace() : offline ? this.wake(cx, true) : null);
     const tip = ready ? "New WSL space" : offline ? `Offline: ${this.why ?? "WSL isn't reachable"}. Click to reconnect.`
-      : state === "loading" ? "Connecting to WSL…" : "Run setup.ps1 from the herdr-wsl folder";
+      : state === "loading" ? "Connecting to WSL…" : state === "missing" ? "Run setup.ps1 from the herdr-wsl folder"
+      : `WSL is ${s.word}`;
     const dot = div().size(7).rounded(4).bg(s.color(t));
     const root = h_flex().id("wsl-root").size_full().items_center().text_size(12.5).text_color(t.muted)
       .on_size_change((size, cx) => { this.width = size.width; cx.notify(); });

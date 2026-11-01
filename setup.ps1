@@ -126,28 +126,81 @@ function Install-Mod([string]$Name) {
 }
 
 # Add the ctrl-shift-n section to keys.json as text, so the person's formatting stays.
+# Nothing is written unless the result parses; a file that isn't plain JSON is left alone.
 function Add-KeySection {
   $file = Join-Path $HerdrHome "keys.json"
   $section = "  `"$KeySection`": {`n    `"ctrl-shift-n`": `"wsl.new-space`"`n  }"
-  if (-not (Test-Path $file)) { [IO.File]::WriteAllText($file, "{`n$section`n}`n"); return "created" }
-  $text = [IO.File]::ReadAllText($file)
-  if (($text | ConvertFrom-Json).PSObject.Properties.Name -contains $KeySection) { return "already there" }
-  $body = $text.Substring(0, $text.LastIndexOf("}")).TrimEnd()
-  $new = $body + $(if ($body.EndsWith("{")) { "" } else { "," }) + "`n$section`n}`n"
-  $null = $new | ConvertFrom-Json # still valid JSON, or this throws before writing
+  $text = if (Test-Path $file) { [IO.File]::ReadAllText($file) } else { "" }
+  if (-not $text.Trim()) { [IO.File]::WriteAllText($file, "{`n$section`n}`n"); return "created" }
+  try {
+    $keys = $text | ConvertFrom-Json -ErrorAction Stop
+    if ($keys.PSObject.Properties.Name -contains $KeySection) { return "already there" }
+    $body = $text.Substring(0, $text.LastIndexOf("}")).TrimEnd()
+    $new = $body + $(if ($body.EndsWith("{")) { "" } else { "," }) + "`n$section`n}`n"
+    $null = $new | ConvertFrom-Json -ErrorAction Stop
+  } catch {
+    if ($text -match ('"' + [regex]::Escape($KeySection) + '"\s*:')) { return "already there" }
+    return "left alone (keys.json isn't plain JSON): add `"$KeySection`": { `"ctrl-shift-n`": `"wsl.new-space`" } yourself"
+  }
   Copy-Item $file "$file.bak-herdr-wsl" -Force
   [IO.File]::WriteAllText($file, $new)
   return "added (backup: keys.json.bak-herdr-wsl)"
 }
 
+# Remove that section: with the comma before it, or (when it's first) the one after it.
 function Remove-KeySection {
   $file = Join-Path $HerdrHome "keys.json"
-  if (-not (Test-Path $file)) { return }
+  if (-not (Test-Path $file)) { return "no keys.json" }
   $text = [IO.File]::ReadAllText($file)
-  $new = [regex]::Replace($text, ',?\s*"' + [regex]::Escape($KeySection) + '"\s*:\s*\{[^{}]*\}', "")
-  if ($new -eq $text) { return }
-  $null = $new | ConvertFrom-Json
+  $sec = '"' + [regex]::Escape($KeySection) + '"\s*:\s*\{[^{}]*\}'
+  $new = [regex]::Replace($text, ',\s*' + $sec, "")
+  if ($new -eq $text) { $new = [regex]::Replace($text, $sec + '\s*,?', "") }
+  if ($new -eq $text) { return "no section" }
+  try { $null = $new | ConvertFrom-Json -ErrorAction Stop }
+  catch { return "left alone (the result wouldn't be valid JSON): remove `"$KeySection`" yourself" }
   [IO.File]::WriteAllText($file, $new)
+  return "removed"
+}
+
+# The herdr-wsl Host blocks in ~/.ssh/config: machine, port and distro of each.
+# (Blocks from 0.2.1 and earlier have no distro line: Distro is $null.)
+function Get-HerdrBlocks {
+  $text = if (Test-Path $SshConfig) { [IO.File]::ReadAllText($SshConfig) } else { "" }
+  $re = [regex]::Escape($Begin) + '\r?\nHost (\S+)\r?\n(.*?)' + [regex]::Escape($End)
+  foreach ($m in [regex]::Matches($text, $re, "Singleline")) {
+    $body = $m.Groups[2].Value
+    [pscustomobject]@{
+      Machine = $m.Groups[1].Value
+      Port = if ($body -match '(?m)^\s*Port\s+(\d+)') { [int]$Matches[1] } else { 22 }
+      Distro = if ($body -match '(?m)^\s*#\s*distro:\s*(\S+)') { $Matches[1] } else { $null }
+    }
+  }
+}
+
+# Drop this machine's herdr-wsl block (and its known_hosts line); other machines keep theirs.
+function Remove-HostBlock([string]$Name, [int]$OldPort) {
+  if (-not (Test-Path $SshConfig)) { return }
+  $re = "(?s)\r?\n?" + [regex]::Escape($Begin) + "\r?\nHost " + [regex]::Escape($Name) + "\r?\n.*?" + [regex]::Escape($End) + "\r?\n?"
+  $text = [IO.File]::ReadAllText($SshConfig)
+  if (-not [regex]::IsMatch($text, $re)) { return }
+  [IO.File]::WriteAllText($SshConfig, ([regex]::Replace($text, $re, "`n") -replace "(\r?\n){3,}", "`n`n"))
+  & ssh-keygen.exe -R "[127.0.0.1]:$OldPort" *> $null
+}
+
+function Add-HostBlock([string]$User) {
+  $block = @(
+    "", $Begin,
+    "Host $Machine",
+    "  # distro: $Distro",
+    "  HostName 127.0.0.1",
+    "  Port $Port",
+    "  User $User",
+    "  IdentityFile ~/.ssh/herdr_wsl_ed25519",
+    "  IdentitiesOnly yes",
+    "  StrictHostKeyChecking accept-new",
+    $End, ""
+  ) -join "`n"
+  [IO.File]::AppendAllText($SshConfig, $block)
 }
 
 # Merge keys into mods/wsl/config.json, keeping the person's own (redirect_local, ...).
@@ -215,6 +268,8 @@ ChallengeResponseAuthentication no
 PubkeyAuthentication yes"
 changed=
 if [ "$(cat "$conf" 2>/dev/null)" != "$want" ]; then printf '%s\n' "$want" > "$conf"; changed=1; fi
+# Debian/Ubuntu's sshd won't even check its config before the service has made /run/sshd.
+mkdir -p /run/sshd && chmod 755 /run/sshd
 "$sshd" -t || { rm -f "$conf"; echo "sshd rejected the config; removed $conf" >&2; exit 6; }
 @SVC@
 # Ubuntu 22.10+ starts sshd from ssh.socket by default; run the plain service instead.
@@ -257,6 +312,16 @@ $UnauthorizeScript = @'
 # ---------------------------------------------------------------- the distro
 
 if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { Fail "WSL isn't installed (wsl --install)." }
+$Blocks = @(Get-HerdrBlocks)
+$Ours = $Blocks | Where-Object { $_.Machine -eq $Machine } | Select-Object -First 1
+# Uninstall acts on the distro and port this machine was set up with, not the defaults.
+if ($Uninstall -and $Ours) {
+  if (-not $PSBoundParameters.ContainsKey("Port")) { $Port = $Ours.Port }
+  if (-not $PSBoundParameters.ContainsKey("Distro")) {
+    if ($Ours.Distro) { $Distro = $Ours.Distro }
+    elseif ($Blocks.Count -gt 1) { Fail "The 'Host $Machine' entry predates 0.2.2 and doesn't record its distro, and other herdr-wsl machines exist. Pass -Distro <name>." }
+  }
+}
 $rows = Wsl @("-l", "-v") | Where-Object { $_.Trim() } | Select-Object -Skip 1
 $cols = { param($r) ($r.Trim().TrimStart("*").Trim()) -split '\s+' }
 if (-not $Distro) {
@@ -282,19 +347,15 @@ if ($Uninstall) {
     Invoke-DistroScript $UnsshdScript -Root | Out-Null
     Note "sshd stopped; the OpenSSH server stays installed"
   }
-  # Only this machine's block: other distros set up the same way keep theirs.
-  $blockRe = "(?s)\r?\n?" + [regex]::Escape($Begin) + "\r?\nHost " + [regex]::Escape($Machine) + "\r?\n.*?" + [regex]::Escape($End) + "\r?\n?"
-  $text = if (Test-Path $SshConfig) { [IO.File]::ReadAllText($SshConfig) } else { "" }
-  if ([regex]::IsMatch($text, $blockRe) -and (Ask "Remove the herdr-wsl 'Host $Machine' entry from ~/.ssh/config?")) {
-    $text = [regex]::Replace($text, $blockRe, "`n") -replace "(\r?\n){3,}", "`n`n"
-    [IO.File]::WriteAllText($SshConfig, $text)
-    & ssh-keygen.exe -R "[127.0.0.1]:$Port" *> $null
+  if ($Ours -and (Ask "Remove the herdr-wsl 'Host $Machine' entry from ~/.ssh/config?")) {
+    Remove-HostBlock $Machine $Port
     Note "removed Host $Machine and its known_hosts line"
   }
+  # Other distros set up the same way keep their entries, the key and the mods.
+  $others = @(Get-HerdrBlocks)
   if ((Test-Path "$KeyFile.pub") -and (Ask "Unauthorize the herdr-wsl key in $Distro?")) {
     Invoke-DistroScript $UnauthorizeScript | Out-Null
-    # The key itself goes only with the last herdr-wsl Host entry.
-    if (-not $text.Contains($Begin)) {
+    if (-not $others) {
       Remove-Item "$KeyFile", "$KeyFile.pub" -ErrorAction SilentlyContinue
       Note "key unauthorized and deleted"
     } else {
@@ -303,15 +364,23 @@ if ($Uninstall) {
   }
   $installed = $Mods | Where-Object { Test-OurMod (Join-Path $HerdrHome "mods\$_") }
   $layout = Join-Path $HerdrHome "layouts\main-wsl.json"
-  $others = $text.Contains($Begin) # other distros still set up: the mods stay for them
   if ($others) {
+    # The mods may still point at this machine (the last one set up): move them to one that stays.
+    $cfgFile = Join-Path $HerdrHome "mods\wsl\config.json"
+    $cfg = $null
+    if (Test-Path $cfgFile) { try { $cfg = Get-Content $cfgFile -Raw | ConvertFrom-Json -ErrorAction Stop } catch { $cfg = $null } }
+    if (-not $cfg -or $cfg.machine -eq $Machine) {
+      $next = $others[0]
+      $json = Set-ModConfig @{ machine = $next.Machine; distro = $next.Distro }
+      if ($json) { Note "mods/wsl/config.json now points at '$($next.Machine)': $json" }
+    }
     Note "other herdr-wsl machines remain; mods and layout kept"
   } elseif (($installed -or (Test-Path $layout)) -and (Ask "Remove the herdr-wsl mods, the main-wsl layout and its key?")) {
     $app = Find-HerdrApp
     if ($app) { & $app do layout.switch --name main *> $null }
     foreach ($m in $installed) { Remove-Item (Join-Path $HerdrHome "mods\$m") -Recurse -Force }
     Remove-Item $layout, (Join-Path $HerdrHome "layouts\main-wsl.png") -ErrorAction SilentlyContinue
-    Remove-KeySection
+    Note ("keys.json ${KeySection}: {0}" -f (Remove-KeySection))
     Note "removed; the window is on Herdr's main layout"
   } else {
     Remove-Item (Join-Path $HerdrHome "mods\wsl\config.json") -ErrorAction SilentlyContinue
@@ -335,16 +404,20 @@ Say "2/4 ssh from Windows"
 if (-not (Get-Command ssh.exe -ErrorAction SilentlyContinue)) {
   Fail "The Windows OpenSSH client is missing (Settings > System > Optional features > OpenSSH Client)."
 }
-if (Test-Ssh) {
+# Our own block for this machine is rewritten when it names another port or distro (a
+# re-run with -Port after a port clash) or predates the distro line.
+$stale = $Ours -and ($Ours.Port -ne $Port -or $Ours.Distro -ne $Distro)
+if (-not $stale -and (Test-Ssh)) {
   Note "'ssh $Machine' already works; Host entry left as it is"
   # A key from an earlier setup gets the from-loopback restriction.
   if (Test-Path "$KeyFile.pub") { Invoke-DistroScript $AuthorizeScript @(ConvertTo-WslPath "$KeyFile.pub") | Out-Null }
 } else {
   $hasHost = (Test-Path $SshConfig) -and (Select-String -Path $SshConfig -Pattern "^\s*Host\s+(.*\s)?$([regex]::Escape($Machine))(\s|$)" -Quiet)
-  if ($hasHost -and -not (Select-String -Path $SshConfig -SimpleMatch $Begin -Quiet)) {
+  if ($hasHost -and -not $Ours) {
     Fail "~/.ssh/config already has a 'Host $Machine' that doesn't connect. Fix or rename it, or pass -Machine <other name>."
   }
-  if (-not (Ask "Create ~/.ssh/herdr_wsl_ed25519 (no passphrase), authorize it in $Distro (from this PC only) and add 'Host $Machine' to ~/.ssh/config?")) {
+  $what = if ($stale) { "update 'Host $Machine' in ~/.ssh/config (port $Port, distro $Distro)" } else { "add 'Host $Machine' to ~/.ssh/config" }
+  if (-not (Ask "Use ~/.ssh/herdr_wsl_ed25519 (no passphrase; made if missing), authorize it in $Distro (from this PC only) and $what?")) {
     Fail "Herdr needs to reach the distro over ssh; stopped."
   }
   New-Item -ItemType Directory -Force (Split-Path $KeyFile) | Out-Null
@@ -356,20 +429,8 @@ if (Test-Ssh) {
   }
   if ((Invoke-DistroScript $AuthorizeScript @(ConvertTo-WslPath "$KeyFile.pub")) -ne 0) { Fail "Couldn't authorize the key in $Distro." }
   $user = (Wsl @("-d", $Distro, "--", "whoami") | Select-Object -First 1).Trim()
-  if (-not $hasHost) {
-    $block = @(
-      "", $Begin,
-      "Host $Machine",
-      "  HostName 127.0.0.1",
-      "  Port $Port",
-      "  User $user",
-      "  IdentityFile ~/.ssh/herdr_wsl_ed25519",
-      "  IdentitiesOnly yes",
-      "  StrictHostKeyChecking accept-new",
-      $End, ""
-    ) -join "`n"
-    [IO.File]::AppendAllText($SshConfig, $block)
-  }
+  if ($Ours) { Remove-HostBlock $Machine $Ours.Port }
+  Add-HostBlock $user
   if (-not (Test-Ssh)) { Fail "'ssh $Machine' still doesn't connect. Is port $Port taken on Windows? Try -Port <other>." }
   Note "'ssh $Machine' connects as $user"
 }
@@ -397,9 +458,13 @@ if (Test-Path (Join-Path $Src "mods\wsl\main.js")) {
     if (Test-Path $layout) {
       Note "layouts/main-wsl.json: kept (yours, with your clicks)"
     } else {
-      Copy-Item (Join-Path $Src "layouts\main-wsl.png") (Join-Path $HerdrHome "layouts") -Force
-      Copy-Item (Join-Path $Src "layouts\main-wsl.json") $layout
-      Note "layouts/main-wsl.json: installed"
+      # The folder first: Copy-Item to a missing folder makes a file of that name.
+      try {
+        New-Item -ItemType Directory -Force (Join-Path $HerdrHome "layouts") -ErrorAction Stop | Out-Null
+        Copy-Item (Join-Path $Src "layouts\main-wsl.png") (Join-Path $HerdrHome "layouts\main-wsl.png") -Force -ErrorAction Stop
+        Copy-Item (Join-Path $Src "layouts\main-wsl.json") $layout -ErrorAction Stop
+        Note "layouts/main-wsl.json: installed"
+      } catch { Fail "couldn't install layouts/main-wsl.json: $($_.Exception.Message)" }
     }
     Note ("keys.json ${KeySection}: {0}" -f (Add-KeySection))
   }

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.2
+
+- **Fresh Ubuntu/Debian installs work again.** `sshd -t` (added in 0.2.0) failed
+  before the ssh service had ever run, because `/run/sshd` didn't exist yet.
+- **Re-running with `-Port`** (the fix the script suggests for a port clash) now
+  rewrites the machine's Host entry instead of keeping the old port.
+- **Uninstall acts on the right distro.** Host entries record their distro, and
+  `-Uninstall` reads the distro and port back instead of using the defaults. The mod
+  config is pointed at a remaining machine.
+- **keys.json is never written broken.** Each step stops on error; an empty file is
+  treated as new; a file with comments is left alone; removing the section when it
+  comes first no longer leaves a stray comma.
+- The layouts folder is created before the layout is copied.
+- Mods: the redirect checks WSL is still connected before closing a local space; the
+  Spaces `+` falls back to this computer while WSL is offline or missing; an unknown
+  machine state no longer breaks the WSL row; the keepalive can't be launched twice
+  at once.
 ## 0.2.1
 
 - setup.ps1 is pure ASCII: Windows PowerShell 5.1 reads BOM-less files as ANSI, which garbled the BOM-stripping in distro detection.

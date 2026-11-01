@@ -26,6 +26,12 @@ jobs:
           $found | Format-Table -AutoSize | Out-String -Width 200
           if ($found | Where-Object Severity -in "Error", "Warning") { exit 1 }
 
+      - name: keys.json add/remove (Windows PowerShell 5.1 and PowerShell 7)
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests/keys.ps1; if ($LASTEXITCODE) { exit 1 }
+          pwsh -NoProfile -File tests/keys.ps1; if ($LASTEXITCODE) { exit 1 }
+
       - name: JSON files parse
         shell: pwsh
         run: |
