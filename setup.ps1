@@ -27,6 +27,7 @@
 .EXAMPLE
   .\setup.ps1 -Uninstall
 #>
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSReviewUnusedParameter", "Yes", Justification = "Read by Ask, in script scope")]
 [CmdletBinding()]
 param(
   [string]$Distro,
@@ -55,7 +56,7 @@ function Ask([string]$m) {
 # wsl.exe's output, NULs stripped in case WSL_UTF8 isn't honored (older WSL).
 function Wsl([string[]]$WslArgs) {
   $out = & wsl.exe @WslArgs
-  return ($out | ForEach-Object { $_ -replace '[\x00﻿]', '' })
+  return ($out | ForEach-Object { $_.Replace([string][char]0, "").Replace([string][char]0xFEFF, "") })
 }
 
 # A Windows path as the distro sees it.
@@ -156,7 +157,8 @@ function Set-ModConfig([hashtable]$Values) {
   $file = Join-Path $modDir "config.json"
   $cfg = [ordered]@{}
   if (Test-Path $file) {
-    try { (Get-Content $file -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $cfg[$_.Name] = $_.Value } } catch { }
+    try { (Get-Content $file -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $cfg[$_.Name] = $_.Value } }
+    catch { Note "mods/wsl/config.json wasn't valid JSON; writing a fresh one" }
   }
   foreach ($k in $Values.Keys) { $cfg[$k] = $Values[$k] }
   $json = [pscustomobject]$cfg | ConvertTo-Json -Compress

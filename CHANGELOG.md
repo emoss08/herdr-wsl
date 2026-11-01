@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- setup.ps1 is pure ASCII: Windows PowerShell 5.1 reads BOM-less files as ANSI, which garbled the BOM-stripping in distro detection.
+- A broken mods/wsl/config.json is reported, then rewritten.
+
 ## 0.2.0
 
 - **WSL is where spaces go.** `wsl-spaces` (Herdr's spaces list, changed) hides an

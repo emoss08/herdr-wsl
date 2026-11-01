@@ -30,7 +30,8 @@ const STATE = {
 async function defaultDistro() {
   try {
     const r = await exec("wsl.exe", ["-l", "-v"]);
-    const row = r.stdout.replace(/[\u0000﻿]/g, "").split(/\r?\n/).find((l) => l.trim().startsWith("*"));
+    const text = r.stdout.replaceAll("\u0000", "").replaceAll(String.fromCharCode(0xfeff), "");
+    const row = text.split(/\r?\n/).find((l) => l.trim().startsWith("*"));
     return row?.trim().slice(1).trim().split(/\s+/)[0] || null;
   } catch { return null; }
 }
